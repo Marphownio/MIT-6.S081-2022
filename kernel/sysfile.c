@@ -16,6 +16,46 @@
 #include "file.h"
 #include "fcntl.h"
 
+
+
+
+int rec_symlink_find(char* path,int cnt){
+    // Represent if it is a cycle.
+    if(cnt > 10)
+        return 0;
+    cnt++;
+
+    char newpath[MAXPATH];
+    struct inode *ip;
+
+
+    if((ip = namei(path)) == 0)
+        return 0;
+    ilock(ip);
+
+    // If it is the true inode,return;
+    if(ip->type != T_SYMLINK)
+    {
+        iunlockput(ip);
+        return 1;
+    }
+
+
+    if(readi(ip,0,(uint64)&newpath,0,MAXPATH) != MAXPATH){
+        iunlockput(ip);
+        return 0;
+    }
+    iunlockput(ip);
+
+    memmove(path,newpath,MAXPATH);
+    return rec_symlink_find(path,cnt);
+}
+
+
+
+
+
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -304,6 +344,14 @@ sys_open(void)
       return -1;
     }
   } else {
+    // Make sure that it's a true file,if NOT O_NOFOLLOW.
+    if((omode & O_NOFOLLOW) == 0){
+        if(rec_symlink_find(path,0) == 0){
+            end_op();
+            return -1;
+        }
+
+    }
     if((ip = namei(path)) == 0){
       end_op();
       return -1;
@@ -321,6 +369,10 @@ sys_open(void)
     end_op();
     return -1;
   }
+
+
+
+  
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
@@ -482,5 +534,35 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+
+uint64
+sys_symlink(void)
+{  
+  char path[MAXPATH], target[MAXPATH];
+  struct inode *ip;
+  // 读取参数
+  if(argstr(0, target, MAXPATH) < 0)
+    return -1;
+  if(argstr(1, path, MAXPATH) < 0)
+    return -1;
+  // 开启事务
+  begin_op();
+  // 为这个符号链接新建一个 inode
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  }
+  // 在符号链接的 data 中写入被链接的文件
+  if(writei(ip, 0, (uint64)target, 0, MAXPATH) < MAXPATH) {
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+  // 提交事务
+  iunlockput(ip);
+  end_op();
   return 0;
 }
