@@ -548,6 +548,10 @@ sys_symlink(void)
     return -1;
   if(argstr(1, path, MAXPATH) < 0)
     return -1;
+    /*我们对盘块进行写操作时，首先要调用begin_op标注事务的开始
+    ，然后通过bget拿到盘块对应的缓冲块，并在bp->data上写入数据。
+    写操作执行完成后，需要调用log_write，将这个buf添加到日志中，
+    最后调用end_op标注事务的结束。*/
   // 开启事务
   begin_op();
   // 为这个符号链接新建一个 inode
@@ -558,6 +562,16 @@ sys_symlink(void)
   // 在符号链接的 data 中写入被链接的文件
   if(writei(ip, 0, (uint64)target, 0, MAXPATH) < MAXPATH) {
     iunlockput(ip);
+    /*iput会使ip->ref的数量减1（注意与ip->nlink区分开）。这个值记录
+    着外部所持有struct inode指针的总数量。当这个值减小到0时，说明没有
+    进程在访问这个文件，此时要将icache中对应的struct inode释放掉，但不会释放对应的文件。
+    
+    iunlock会释放掉struct inode的锁，这把锁用来实现并发环境下的struct inode的原子访问，
+    即我们在查看struct inode中的成员（type、data等）时，必须持有这把锁
+    
+    iunlockput同时调用上述两个函数；
+    
+    */
     end_op();
     return -1;
   }
