@@ -346,7 +346,7 @@ sys_open(void)
   } else {
     // Make sure that it's a true file,if NOT O_NOFOLLOW.
     if((omode & O_NOFOLLOW) == 0){
-        if((ip=rec_symlink_find(path,0)) == 0){
+        if(rec_symlink_find(path,0) == 0){
             end_op();
             return -1;
         }
